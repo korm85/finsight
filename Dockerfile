@@ -24,11 +24,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend source
-COPY backend/ ./backend/
+# Copy backend source into /app so module path "app.main" resolves correctly
+COPY backend/ .
 
-# Copy built frontend dist into backend static dir
-COPY --from=frontend-builder /frontend/dist ./backend/app/static
+# Copy built frontend dist into app/static (where main.py looks for it)
+COPY --from=frontend-builder /frontend/dist ./app/static
 
 # Set environment
 ENV PYTHONPATH=/app

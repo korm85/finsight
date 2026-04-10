@@ -61,7 +61,8 @@ app.include_router(settings_router)
 app.include_router(analysis_router)
 
 # Serve built frontend in production
-static_path = os.path.join(os.path.dirname(__file__), "static")
+# __file__ is /app/app/main.py — go up two dirs to /app, then into static
+static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 if os.path.isdir(static_path):
     app.mount("/static", StaticFiles(directory=static_path), name="static")
 
