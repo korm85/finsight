@@ -61,6 +61,10 @@ app.include_router(alerts_router)
 app.include_router(settings_router)
 app.include_router(analysis_router)
 
+@app.get("/api/health")
+async def health():
+    return {"status": "ok"}
+
 # Serve built frontend in production
 # __file__ = /app/app/main.py → go up two dirs to /app, then /static
 static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
@@ -81,8 +85,12 @@ if os.path.isdir(static_path):
             return HTMLResponse(content=html)
         return {"detail": "Frontend not built"}
 
-    @app.get("/{path:path}", response_class=HTMLResponse)
+    @app.get("/{path:path}", response_class=HTMLResponse, include_in_schema=False)
     async def serve_spa(path: str):
+        # Never intercept API paths
+        if path.startswith("api/"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Not found")
         # Try static file first
         file_path = os.path.join(static_path, path)
         if os.path.isfile(file_path):
@@ -93,11 +101,6 @@ if os.path.isdir(static_path):
         if html:
             return HTMLResponse(content=html)
         return {"detail": "Not found"}
-
-
-@app.get("/api/health")
-async def health():
-    return {"status": "ok"}
 
 
 @app.websocket("/ws/alerts")
