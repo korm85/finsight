@@ -68,7 +68,6 @@ async def health():
 # Serve built frontend in production
 # __file__ = /app/app/main.py → go up two dirs to /app, then /static
 static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
-print(f"[FinSight] static_path={static_path} exists={os.path.isdir(static_path)}")
 
 if os.path.isdir(static_path):
     app.mount("/static", StaticFiles(directory=static_path, html=False), name="static")
