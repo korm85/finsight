@@ -96,20 +96,22 @@ class YFinanceService:
         if hist is None or hist.empty:
             return None
 
-        hist = hist.reset_index()
+        # Access index directly (DatetimeIndex) + columns for reliability
         candles = []
-        for _, row in hist.iterrows():
-            dt = row.get("Datetime") or row.get("Date")
-            if dt is None:
+        for i in range(len(hist)):
+            dt = hist.index[i]
+            row = hist.iloc[i]
+            try:
+                candles.append(ChartCandle(
+                    time=int(pd.to_datetime(dt).timestamp()),
+                    open=float(row["Open"]),
+                    high=float(row["High"]),
+                    low=float(row["Low"]),
+                    close=float(row["Close"]),
+                    volume=int(row["Volume"]),
+                ))
+            except (KeyError, ValueError):
                 continue
-            candles.append(ChartCandle(
-                time=int(pd.to_datetime(dt).timestamp()),
-                open=float(row["Open"]),
-                high=float(row["High"]),
-                low=float(row["Low"]),
-                close=float(row["Close"]),
-                volume=int(row["Volume"]),
-            ))
         return ChartResponse(ticker=ticker.upper(), candles=candles, indicators={})
 
     async def search_tickers(self, query: str) -> List[SearchResult]:
