@@ -1,5 +1,6 @@
 import yfinance as yf
 import pandas as pd
+import requests
 from typing import Optional, List
 from app.schemas.market import (
     QuoteResponse, ChartCandle, ChartResponse,
@@ -10,6 +11,16 @@ import logging
 import time
 
 logger = logging.getLogger(__name__)
+
+# Configure yfinance with a browser-like User-Agent to avoid 429 blocks
+_session = requests.Session()
+_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/html, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://finance.yahoo.com/",
+})
+yf.session = _session
 
 
 class YFinanceService:
