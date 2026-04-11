@@ -3,6 +3,14 @@ import PageHeader from "../components/layout/PageHeader";
 import Button from "../components/ui/Button";
 import { settingsApi } from "../services/api";
 
+type SettingsState = {
+  display_name: string;
+  email: string;
+  email_notifications: boolean;
+  push_notifications: boolean;
+  refresh_rate: number;
+};
+
 export default function Settings() {
   const [settings, setSettings] = useState({
     display_name: "Investor",
@@ -14,7 +22,7 @@ export default function Settings() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    settingsApi.get().then((s: any) => setSettings(s)).catch(console.error);
+    settingsApi.get().then((s: SettingsState) => setSettings(s)).catch(console.error);
   }, []);
 
   const handleSave = async () => {

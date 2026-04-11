@@ -7,7 +7,7 @@ class AlertHistory(Base):
     __tablename__ = "alert_history"
 
     id = Column(Integer, primary_key=True, index=True)
-    alert_id = Column(Integer, ForeignKey("alerts.id"), nullable=False)
+    alert_id = Column(Integer, ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
     triggered_at = Column(DateTime, default=datetime.utcnow)
     delivered_inapp = Column(Boolean, default=False)
     delivered_email = Column(Boolean, default=False)

@@ -22,7 +22,7 @@ export function useAlerts() {
   }, [fetchAlerts]);
 
   const createAlert = async (data: Parameters<typeof alertsApi.create>[0]) => {
-    await alertsApi.create(data as any);
+    await alertsApi.create(data);
     await fetchAlerts();
   };
 

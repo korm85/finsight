@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List
+import asyncio
 from app.database import get_db
 from app.models.holding import Holding
 from app.schemas.portfolio import (
@@ -17,13 +17,15 @@ async def get_portfolio(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Holding))
     holdings = result.scalars().all()
 
+    quotes = await asyncio.gather(*[yf_service.get_quote(h.ticker) for h in holdings], return_exceptions=True)
+
     holding_responses = []
     total_value = 0.0
     total_cost = 0.0
     day_pnl = 0.0
 
-    for h in holdings:
-        quote = await yf_service.get_quote(h.ticker)
+    for h, quote_or_exc in zip(holdings, quotes):
+        quote = quote_or_exc if not isinstance(quote_or_exc, Exception) else None
         current_price = quote.price if quote else h.avg_cost
         mv = h.market_value(current_price)
         pnl = h.pnl(current_price)

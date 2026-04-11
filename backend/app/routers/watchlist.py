@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+import asyncio
 from typing import List
 from app.database import get_db
 from app.models.watchlist import Watchlist, WatchlistItem
@@ -20,9 +21,14 @@ async def get_watchlists(db: AsyncSession = Depends(get_db)):
 
     responses = []
     for w in watchlists:
+        tickers = [item.ticker for item in w.items]
+        quotes = await asyncio.gather(
+            *[yf_service.get_quote(t) for t in tickers], return_exceptions=True
+        )
+
         items_with_price = []
-        for item in w.items:
-            quote = await yf_service.get_quote(item.ticker)
+        for item, quote_or_exc in zip(w.items, quotes):
+            quote = quote_or_exc if not isinstance(quote_or_exc, Exception) else None
             if quote:
                 items_with_price.append(WatchlistItemResponse(
                     ticker=item.ticker,

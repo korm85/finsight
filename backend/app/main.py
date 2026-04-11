@@ -45,9 +45,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="FinSight API", version="0.1.0", lifespan=lifespan)
 
+_cors_origins = os.environ.get("CORS_ORIGINS", "https://finsight-28ky.onrender.com").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[s.strip() for s in _cors_origins],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -112,6 +113,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 @app.post("/api/ws/broadcast-alert")
-async def broadcast_alert(ticker: str, message: str):
+async def broadcast_alert(ticker: str, message: str, secret: str = ""):
+    if secret != os.environ.get("BROADCAST_SECRET", ""):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized")
     await manager.broadcast({"type": "alert", "ticker": ticker, "message": message})
     return {"sent": True}

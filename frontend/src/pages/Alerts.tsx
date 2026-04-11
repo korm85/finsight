@@ -11,7 +11,7 @@ export default function Alerts() {
       <AlertList
         alerts={alerts}
         onCreate={async (data) => {
-          await createAlert(data as any);
+          await createAlert(data);
         }}
         onToggle={(id, status) => toggleAlert(id, status)}
         onDelete={(id) => deleteAlert(id)}

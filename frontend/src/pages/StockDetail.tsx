@@ -23,7 +23,10 @@ export default function StockDetail() {
   const [price, setPrice] = useState("");
 
   const ANALYSIS_MODE_KEY = "trading-assistant-mode";
-  const savedMode = (localStorage.getItem(ANALYSIS_MODE_KEY) as AnalysisMode) || "newbie";
+  const VALID_MODES: AnalysisMode[] = ["newbie", "basic", "pro"];
+  const savedMode = VALID_MODES.includes(localStorage.getItem(ANALYSIS_MODE_KEY) as AnalysisMode)
+    ? (localStorage.getItem(ANALYSIS_MODE_KEY) as AnalysisMode)
+    : "newbie";
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(savedMode);
 
   const handleModeChange = (mode: AnalysisMode) => {
@@ -31,8 +34,11 @@ export default function StockDetail() {
     localStorage.setItem(ANALYSIS_MODE_KEY, mode);
   };
 
+  if (!ticker) {
+    return <div className="text-text-secondary p-8">No ticker specified</div>;
+  }
+
   const fetchQuote = useCallback(() => {
-    if (!ticker) return;
     marketApi.quote(ticker)
       .then(setQuote)
       .catch(console.error)
@@ -71,7 +77,7 @@ export default function StockDetail() {
                 {isPositive ? "+" : ""}${quote.change.toFixed(2)}
               </span>
             </div>
-            <PriceChart ticker={ticker!} />
+            <PriceChart ticker={ticker} />
           </div>
         </div>
 
@@ -99,7 +105,7 @@ export default function StockDetail() {
       </div>
 
       <div className="mt-6">
-        <TradingAssistant ticker={ticker!} mode={analysisMode} onModeChange={handleModeChange} />
+        <TradingAssistant ticker={ticker} mode={analysisMode} onModeChange={handleModeChange} />
       </div>
 
       <Modal open={addModalOpen} onClose={() => setAddModalOpen(false)} title={`Add ${ticker} to Portfolio`}>
@@ -130,7 +136,7 @@ export default function StockDetail() {
               onClick={() => {
                 if (!qty || !price) return;
                 portfolioApi.addHolding({
-                  ticker: ticker!,
+                  ticker: ticker,
                   name: quote.name,
                   quantity: parseFloat(qty),
                   avg_cost: parseFloat(price),
