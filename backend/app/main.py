@@ -61,18 +61,37 @@ app.include_router(settings_router)
 app.include_router(analysis_router)
 
 # Serve built frontend in production
-# __file__ is /app/app/main.py — go up two dirs to /app, then into static
+# __file__ = /app/app/main.py → go up two dirs to /app, then /static
 static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 if os.path.isdir(static_path):
     app.mount("/static", StaticFiles(directory=static_path), name="static")
 
+    def read_index():
+        idx = os.path.join(static_path, "index.html")
+        if os.path.exists(idx):
+            with open(idx) as f:
+                return f.read()
+        return None
+
+    @app.get("/")
+    async def serve_root():
+        html = read_index()
+        if html:
+            return HTMLResponse(content=html)
+        return {"detail": "Frontend not built"}
+
     @app.get("/{path:path}", response_class=HTMLResponse)
     async def serve_spa(path: str):
-        index_path = os.path.join(static_path, "index.html")
-        if os.path.exists(index_path):
-            with open(index_path, "r") as f:
+        # Try static file first
+        file_path = os.path.join(static_path, path)
+        if os.path.isfile(file_path):
+            with open(file_path, "r") as f:
                 return f.read()
-        return {"detail": "Frontend not built"}
+        # Fall back to index.html for SPA routing
+        html = read_index()
+        if html:
+            return HTMLResponse(content=html)
+        return {"detail": "Not found"}
 
 
 @app.get("/api/health")
