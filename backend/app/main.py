@@ -68,8 +68,10 @@ async def health():
 # Serve built frontend in production
 # __file__ = /app/app/main.py → go up two dirs to /app, then /static
 static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+print(f"[FinSight] static_path={static_path} exists={os.path.isdir(static_path)}")
+
 if os.path.isdir(static_path):
-    app.mount("/static", StaticFiles(directory=static_path), name="static")
+    app.mount("/static", StaticFiles(directory=static_path, html=False), name="static")
 
     def read_index():
         idx = os.path.join(static_path, "index.html")
@@ -85,17 +87,17 @@ if os.path.isdir(static_path):
             return HTMLResponse(content=html)
         return {"detail": "Frontend not built"}
 
-    @app.get("/{path:path}", response_class=HTMLResponse, include_in_schema=False)
+    @app.get("/{path:path}", include_in_schema=False)
     async def serve_spa(path: str):
         # Never intercept API paths
         if path.startswith("api/"):
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Not found")
-        # Try static file first
+        # Serve static files with correct MIME type
         file_path = os.path.join(static_path, path)
         if os.path.isfile(file_path):
-            with open(file_path, "r") as f:
-                return f.read()
+            from fastapi.responses import FileResponse
+            return FileResponse(file_path)
         # Fall back to index.html for SPA routing
         html = read_index()
         if html:
