@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class YFinanceService:
-    """Service for fetching market data from Yahoo Finance with rate limiting and caching."""
+    """Yahoo Finance data service with retry, caching, and rate limiting."""
 
     INDICES = {
         "^GSPC": ("S&P 500", "SPX"),
@@ -28,79 +28,116 @@ class YFinanceService:
         "SPY", "QQQ", "IWM", "DIA", "XLF", "XLK", "XLE", "ARKK", "TSM", "BABA",
     ]
 
-    # Rate limiting: semaphore allows up to 2 concurrent Yahoo Finance requests
     _semaphore: asyncio.Semaphore = asyncio.Semaphore(2)
-
-    # Module-level cache: ticker -> (timestamp, data)
     _quote_cache: dict = {}
-    _top_movers_cache: tuple = None  # (timestamp, data)
-    _index_cache: tuple = None  # (timestamp, data)
-    _CACHE_TTL = 60  # seconds
+    _top_movers_cache: tuple = None
+    _index_cache: tuple = None
+    _CACHE_TTL = 60
 
     def _is_cache_valid(self, cached: tuple) -> bool:
         return cached is not None and (time.time() - cached[0]) < self._CACHE_TTL
 
     async def get_quote(self, ticker: str) -> Optional[QuoteResponse]:
-        # Check cache
         if ticker in self._quote_cache and self._is_cache_valid(self._quote_cache[ticker]):
             return self._quote_cache[ticker][1]
 
         async with self._semaphore:
-            await asyncio.sleep(0.3)  # stagger to avoid rate limiting
-            try:
-                loop = asyncio.get_event_loop()
-                stock = await loop.run_in_executor(None, lambda: yf.Ticker(ticker).info)
-                if not stock:
-                    return None
-
-                price = stock.get("regularMarketPrice") or stock.get("currentPrice")
-                if price is None:
-                    return None
-
-                result = QuoteResponse(
-                    ticker=ticker.upper(),
-                    name=stock.get("longName", stock.get("shortName", ticker)),
-                    price=price,
-                    change=stock.get("regularMarketChange", 0),
-                    change_pct=stock.get("regularMarketChangePercent", 0),
-                    high=stock.get("regularMarketDayHigh", 0),
-                    low=stock.get("regularMarketDayLow", 0),
-                    open=stock.get("regularMarketOpen", 0),
-                    previous_close=stock.get("regularMarketPreviousClose", 0),
-                    volume=stock.get("regularMarketVolume", 0),
-                    market_cap=stock.get("marketCap"),
-                    pe_ratio=stock.get("trailingPE"),
-                    week_52_high=stock.get("fiftyTwoWeekHigh"),
-                    week_52_low=stock.get("fiftyTwoWeekLow"),
-                    dividend_yield=stock.get("dividendYield"),
-                    beta=stock.get("beta"),
-                )
+            await asyncio.sleep(0.5)
+            result = await self._retry_quote(ticker, attempt=0)
+            if result is not None:
                 self._quote_cache[ticker] = (time.time(), result)
-                return result
-            except Exception as e:
-                logger.warning(f"get_quote({ticker}) failed: {e}")
+            return result
+
+    async def _retry_quote(self, ticker: str, attempt: int) -> Optional[QuoteResponse]:
+        max_attempts = 5
+        try:
+            loop = asyncio.get_event_loop()
+            def _fetch():
+                # Try yf.Ticker().info first
+                try:
+                    ticker_obj = yf.Ticker(ticker)
+                    info = ticker_obj.info
+                    if info and ("regularMarketPrice" in info or "currentPrice" in info):
+                        price = info.get("regularMarketPrice") or info.get("currentPrice")
+                        if price is not None:
+                            return QuoteResponse(
+                                ticker=ticker.upper(),
+                                name=info.get("longName", info.get("shortName", ticker)),
+                                price=price,
+                                change=info.get("regularMarketChange", 0),
+                                change_pct=info.get("regularMarketChangePercent", 0),
+                                high=info.get("regularMarketDayHigh", 0),
+                                low=info.get("regularMarketDayLow", 0),
+                                open=info.get("regularMarketOpen", 0),
+                                previous_close=info.get("regularMarketPreviousClose", 0),
+                                volume=info.get("regularMarketVolume", 0),
+                                market_cap=info.get("marketCap"),
+                                pe_ratio=info.get("trailingPE"),
+                                week_52_high=info.get("fiftyTwoWeekHigh"),
+                                week_52_low=info.get("fiftyTwoWeekLow"),
+                                dividend_yield=info.get("dividendYield"),
+                                beta=info.get("beta"),
+                            )
+                except Exception as e:
+                    logger.warning(f"yf.info({ticker}) failed: {e}")
+
+                # Fallback: use yf.download for price data
+                data = yf.download(ticker, period="1d", interval="5m", progress=False, threads=True)
+                if data is not None and not data.empty:
+                    last = data.iloc[-1]
+                    return QuoteResponse(
+                        ticker=ticker.upper(),
+                        name=ticker,
+                        price=float(last["Close"]),
+                        change=float(last["Close"] - last["Open"]),
+                        change_pct=float((last["Close"] - last["Open"]) / last["Open"] * 100) if last["Open"] else 0,
+                        high=float(last["High"]),
+                        low=float(last["Low"]),
+                        open=float(last["Open"]),
+                        previous_close=float(last["Open"]),
+                        volume=int(last["Volume"]),
+                        market_cap=None,
+                        pe_ratio=None,
+                        week_52_high=None,
+                        week_52_low=None,
+                        dividend_yield=None,
+                        beta=None,
+                    )
                 return None
+
+            return await loop.run_in_executor(None, _fetch)
+
+        except Exception as e:
+            logger.warning(f"_retry_quote({ticker}) attempt {attempt} failed: {e}")
+            if attempt < max_attempts - 1:
+                wait = min(2 ** attempt * 2 + (time.time() % 1), 30)
+                logger.info(f"Retrying {ticker} in {wait:.1f}s (attempt {attempt + 1}/{max_attempts})")
+                await asyncio.sleep(wait)
+                return await self._retry_quote(ticker, attempt + 1)
+            return None
 
     async def _fetch_chart(self, ticker: str, period: str, interval: str) -> Optional[pd.DataFrame]:
         async with self._semaphore:
-            await asyncio.sleep(0.3)
-            try:
-                loop = asyncio.get_event_loop()
-                def _fetch():
-                    data = yf.download(
-                        ticker,
-                        period=period,
-                        interval=interval,
-                        progress=False,
-                        threads=True,
-                    )
-                    if isinstance(data.columns, pd.MultiIndex):
-                        data = data.droplevel(1, axis=1)
-                    return data if data is not None and not data.empty else None
-                return await loop.run_in_executor(None, _fetch)
-            except Exception as e:
-                logger.warning(f"_fetch_chart({ticker}) failed: {e}")
-                return None
+            await asyncio.sleep(0.5)
+            return await self._retry_chart(ticker, period, interval, attempt=0)
+
+    async def _retry_chart(self, ticker: str, period: str, interval: str, attempt: int) -> Optional[pd.DataFrame]:
+        max_attempts = 3
+        try:
+            loop = asyncio.get_event_loop()
+            def _fetch():
+                data = yf.download(ticker, period=period, interval=interval, progress=False, threads=True)
+                if isinstance(data.columns, pd.MultiIndex):
+                    data = data.droplevel(1, axis=1)
+                return data if data is not None and not data.empty else None
+            return await loop.run_in_executor(None, _fetch)
+        except Exception as e:
+            logger.warning(f"_retry_chart({ticker}) attempt {attempt} failed: {e}")
+            if attempt < max_attempts - 1:
+                wait = 2 ** attempt * 2
+                await asyncio.sleep(wait)
+                return await self._retry_chart(ticker, period, interval, attempt + 1)
+            return None
 
     async def get_chart(
         self, ticker: str, period: str = "1mo",
@@ -115,7 +152,7 @@ class YFinanceService:
             "MAX": ("max", "1wk"),
         }
         yf_period, interval = tf_map.get(period, ("1mo", "60m"))
-        hist = await self._fetch_chart(ticker, yf_period, interval)
+        hist = await self._retry_chart(ticker, yf_period, interval)
         if hist is None or hist.empty:
             return None
 
@@ -178,22 +215,21 @@ class YFinanceService:
             return []
 
     async def get_index_data(self) -> List[IndexQuote]:
-        """Parallel fetch for all market indices with caching."""
         if self._index_cache and self._is_cache_valid(self._index_cache):
             return self._index_cache[1]
 
         async def fetch_one(symbol: str, name: str, short: str) -> Optional[IndexQuote]:
-            ticker = await self.get_quote(symbol)
-            if not ticker:
+            ticker_data = await self.get_quote(symbol)
+            if not ticker_data:
                 return None
             chart = await self.get_chart(symbol, "1D")
             sparkline = [c.close for c in chart.candles[-20:]] if chart else []
             return IndexQuote(
                 symbol=short,
                 name=name,
-                price=ticker.price,
-                change=ticker.change,
-                change_pct=ticker.change_pct,
+                price=ticker_data.price,
+                change=ticker_data.change,
+                change_pct=ticker_data.change_pct,
                 sparkline=sparkline,
             )
 
@@ -207,7 +243,6 @@ class YFinanceService:
         return valid
 
     async def _fetch_ticker_info(self, ticker: str) -> Optional[dict]:
-        """Fetch info for a single ticker."""
         try:
             loop = asyncio.get_event_loop()
             def _fetch():
@@ -230,11 +265,9 @@ class YFinanceService:
             return None
 
     async def get_top_movers(self) -> dict:
-        """Parallel fetch for all top mover tickers with caching."""
         if self._top_movers_cache and self._is_cache_valid(self._top_movers_cache):
             return self._top_movers_cache[1]
 
-        # Fetch in batches: 5 tickers at a time with rate limiting
         all_quotes = []
         tickers = list(self.TOP_MOVERS_TICKERS)
         for i in range(0, len(tickers), 5):
@@ -246,9 +279,8 @@ class YFinanceService:
             for r in results:
                 if r is not None and not isinstance(r, Exception):
                     all_quotes.append(r)
-            # Small delay between batches to avoid rate limiting
             if i + 5 < len(tickers):
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1.5)
 
         if not all_quotes:
             return {"gainers": [], "losers": [], "most_active": []}
